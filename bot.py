@@ -4,6 +4,7 @@ import requests
 app = Flask(__name__)
 
 BOT_TOKEN = "8636133899:AAH2M4Onguq-3Gx2yInJ-EYvYoYOu5fmKy4"
+CHAT_ID = "-1003981695392"
 
 def send_message(chat_id, text):
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
@@ -17,18 +18,18 @@ def send_message(chat_id, text):
 def webhook():
     data = request.get_json()
 
+    # If message comes from Telegram
     if "message" in data:
         chat_id = data["message"]["chat"]["id"]
         text = data["message"].get("text", "")
+        send_message(chat_id, text)
 
-        if text == "/start":
-            send_message(chat_id, "Bot is now working ✅")
+    # If alert comes from TradingView
+    elif "text" in data:
+        send_message(CHAT_ID, data["text"])
 
     return "ok"
 
 @app.route('/')
 def home():
     return "Bot is running!"
-
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=10000)
