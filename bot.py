@@ -30,7 +30,6 @@ Action: {data.get('action')}
 Timeframe: {data.get('timeframe')}
 Strategy: {data.get('strategy')}
 """
-
     send_message(message)
 
     return "ok", 200
