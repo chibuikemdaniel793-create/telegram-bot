@@ -1,107 +1,129 @@
+from flask import Flask
 import requests
 import time
+import threading
 
-# ========= CONFIG =========
+app = Flask(__name__)
+
+# ================= CONFIG =================
 BOT_TOKEN = "8729302934:AAGTTdfV8lPAR2hg4_zVVqT2ipLG1-lAV4s"
 CHAT_ID = "-1003953725914"
 API_KEY = "99d377849d7549b6bee6e997e1fd9456"
 
-# ========= TELEGRAM =========
+PAIRS = [
+    "EUR/USD", "GBP/USD", "USD/JPY",
+    "AUD/USD", "USD/CAD", "USD/CHF",
+    "EUR/JPY", "GBP/JPY", "EUR/GBP", "AUD/JPY"
+]
+
+last_signal = {}
+
+# ================= TELEGRAM =================
 def send_message(text):
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
     try:
-        requests.post(url, data={"chat_id": CHAT_ID, "text": text}, timeout=5)
+        requests.post(url, data={"chat_id": CHAT_ID, "text": text})
     except:
         pass
 
-def get_updates(offset=None):
-    url = f"https://api.telegram.org/bot{BOT_TOKEN}/getUpdates"
-    try:
-        return requests.get(url, params={"timeout": 100, "offset": offset}).json()
-    except:
-        return {"result": []}
-
-# ========= DATA =========
-def get_data(symbol):
+# ================= DATA =================
+def get_indicators(symbol):
     base = "https://api.twelvedata.com"
 
     try:
-        rsi = requests.get(f"{base}/rsi?symbol={symbol}&interval=1min&apikey={API_KEY}", timeout=5).json()
-        ema50 = requests.get(f"{base}/ema?symbol={symbol}&interval=1min&time_period=50&apikey={API_KEY}", timeout=5).json()
-        ema200 = requests.get(f"{base}/ema?symbol={symbol}&interval=1min&time_period=200&apikey={API_KEY}", timeout=5).json()
+        rsi = requests.get(f"{base}/rsi?symbol={symbol}&interval=1min&apikey={API_KEY}").json()
+        ema50 = requests.get(f"{base}/ema?symbol={symbol}&interval=1min&time_period=50&apikey={API_KEY}").json()
+        ema200 = requests.get(f"{base}/ema?symbol={symbol}&interval=1min&time_period=200&apikey={API_KEY}").json()
 
-        rsi_val = float(rsi["values"][0]["rsi"])
-        ema50_val = float(ema50["values"][0]["ema"])
-        ema200_val = float(ema200["values"][0]["ema"])
-
-        return rsi_val, ema50_val, ema200_val
-
+        return (
+            float(rsi["values"][0]["rsi"]),
+            float(ema50["values"][0]["ema"]),
+            float(ema200["values"][0]["ema"])
+        )
     except:
         return None, None, None
 
-# ========= STRATEGY =========
-def get_signal(symbol):
-    rsi, ema50, ema200 = get_data(symbol)
+# ================= SIGNAL LOGIC =================
+def generate_signal(symbol):
+    rsi, ema50, ema200 = get_indicators(symbol)
 
     if rsi is None:
-        return "ERROR", None
+        return "NO DATA"
 
-    if ema50 > ema200 and 40 <= rsi <= 55:
-        return "CALL", rsi
+    # TREND
+    if ema50 > ema200 and rsi < 40:
+        return "CALL"
+    elif ema50 < ema200 and rsi > 60:
+        return "PUT"
 
-    if ema50 < ema200 and 45 <= rsi <= 60:
-        return "PUT", rsi
+    return "WAIT"
 
-    return "NO TRADE", rsi
+# ================= MANUAL SIGNAL =================
+def send_signal(pair):
+    send_message(f"🔍 Generating signal for {pair}...")
 
-# ========= BOT LOOP =========
-def run_bot():
-    last_update_id = None
+    signal = generate_signal(pair)
 
-    send_message("🤖 Bot is now ACTIVE!\nUse /signal EURUSD")
+    if signal == "CALL":
+        send_message(f"📈 {pair} → BUY (CALL)\n⏱ Time: 1 Minute")
+    elif signal == "PUT":
+        send_message(f"📉 {pair} → SELL (PUT)\n⏱ Time: 1 Minute")
+    else:
+        send_message(f"⚠️ No clear signal for {pair}")
+
+# ================= AUTO SCANNER =================
+def auto_scan():
+    while True:
+        for pair in PAIRS:
+            signal = generate_signal(pair)
+
+            if signal in ["CALL", "PUT"]:
+                if last_signal.get(pair) != signal:
+                    send_message(f"🔥 AUTO SIGNAL\n{pair} → {signal} (1M)")
+                    last_signal[pair] = signal
+
+        time.sleep(15)  # FAST SCAN (no long delay)
+
+# ================= TELEGRAM COMMAND =================
+def get_updates(offset=None):
+    url = f"https://api.telegram.org/bot{BOT_TOKEN}/getUpdates"
+    return requests.get(url, params={"timeout": 100, "offset": offset}).json()
+
+def handle_updates():
+    last_id = None
 
     while True:
-        updates = get_updates(last_update_id)
+        updates = get_updates(last_id)
 
         for update in updates.get("result", []):
-            last_update_id = update["update_id"] + 1
+            last_id = update["update_id"] + 1
 
             if "message" in update:
-                text = update["message"]["text"]
+                text = update["message"]["text"].lower()
 
                 if text == "/start":
-                    send_message("✅ Bot working!\nUse /signal EURUSD")
+                    send_message("🤖 Bot Active!\nUse /signal eurusd")
 
                 elif text.startswith("/signal"):
                     parts = text.split()
 
                     if len(parts) < 2:
-                        send_message("⚠️ Use: /signal EURUSD")
+                        send_message("⚠️ Use: /signal eurusd")
                         continue
 
                     pair = parts[1].upper()
 
-                    send_message(f"🔍 Checking {pair}...")
+                    # FIX FORMAT (EURUSD → EUR/USD)
+                    if "/" not in pair:
+                        pair = pair[:3] + "/" + pair[3:]
 
-                    result, rsi = get_signal(pair)
+                    send_signal(pair)
 
-                    if result == "ERROR":
-                        send_message("⚠️ Data error. Try again.")
-                        continue
+        time.sleep(2)
 
-                    if result == "NO TRADE":
-                        send_message(f"⚠️ {pair}\nNo good setup now\nRSI: {rsi:.2f}")
-                        continue
-
-                    send_message(
-                        f"📊 {pair}\n"
-                        f"📢 SIGNAL: {result}\n"
-                        f"⏱ Duration: 1 Minute\n"
-                        f"📈 RSI: {rsi:.2f}"
-                    )
-
-        time.sleep(1)
-
-# ========= RUN =========
+# ================= RUN =================
 if __name__ == "__main__":
-    run_bot()
+    threading.Thread(target=auto_scan).start()
+    threading.Thread(target=handle_updates).start()
+
+    app.run(host="0.0.0.0", port=10000)
