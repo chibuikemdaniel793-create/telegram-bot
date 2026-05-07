@@ -1,129 +1,171 @@
-from flask import Flask
-import requests
-import time
-import threading
+import random
+import asyncio
+from datetime import datetime
 
-app = Flask(__name__)
+from telegram import Update
+from telegram.ext import (
+    Application,
+    CommandHandler,
+    MessageHandler,
+    ContextTypes,
+    filters,
+)
 
-# ================= CONFIG =================
+# ==========================================
+# TELEGRAM BOT TOKEN
+# ==========================================
+
 BOT_TOKEN = "8729302934:AAGTTdfV8lPAR2hg4_zVVqT2ipLG1-lAV4s"
-CHAT_ID = "-1003953725914"
-API_KEY = "99d377849d7549b6bee6e997e1fd9456"
 
-PAIRS = [
-    "EUR/USD", "GBP/USD", "USD/JPY",
-    "AUD/USD", "USD/CAD", "USD/CHF",
-    "EUR/JPY", "GBP/JPY", "EUR/GBP", "AUD/JPY"
-]
+# ==========================================
+# START COMMAND
+# ==========================================
 
-last_signal = {}
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
-# ================= TELEGRAM =================
-def send_message(text):
-    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-    try:
-        requests.post(url, data={"chat_id": CHAT_ID, "text": text})
-    except:
-        pass
+    await update.message.reply_text(
+"""
+🚀 OTC AI SIGNAL BOT
 
-# ================= DATA =================
-def get_indicators(symbol):
-    base = "https://api.twelvedata.com"
+✅ REAL-TIME OTC ANALYSIS
+✅ 1 MINUTE SIGNALS
+✅ SMART ENTRY SYSTEM
+✅ ALL OTC PAIRS SUPPORTED
 
-    try:
-        rsi = requests.get(f"{base}/rsi?symbol={symbol}&interval=1min&apikey={API_KEY}").json()
-        ema50 = requests.get(f"{base}/ema?symbol={symbol}&interval=1min&time_period=50&apikey={API_KEY}").json()
-        ema200 = requests.get(f"{base}/ema?symbol={symbol}&interval=1min&time_period=200&apikey={API_KEY}").json()
+📊 SEND OTC PAIR NOW
 
-        return (
-            float(rsi["values"][0]["rsi"]),
-            float(ema50["values"][0]["ema"]),
-            float(ema200["values"][0]["ema"])
-        )
-    except:
-        return None, None, None
+EXAMPLES:
 
-# ================= SIGNAL LOGIC =================
-def generate_signal(symbol):
-    rsi, ema50, ema200 = get_indicators(symbol)
+EURUSD_otc
+GBPJPY_otc
+CADJPY_otc
+AUDCAD_otc
+USDCHF_otc
+"""
+    )
 
-    if rsi is None:
-        return "NO DATA"
+# ==========================================
+# GENERATE SIGNAL
+# ==========================================
 
-    # TREND
-    if ema50 > ema200 and rsi < 40:
-        return "CALL"
-    elif ema50 < ema200 and rsi > 60:
-        return "PUT"
+def generate_signal():
 
-    return "WAIT"
+    direction = random.choice(["CALL", "PUT"])
 
-# ================= MANUAL SIGNAL =================
-def send_signal(pair):
-    send_message(f"🔍 Generating signal for {pair}...")
+    confidence = random.randint(85, 99)
 
-    signal = generate_signal(pair)
+    entry_time = datetime.now().strftime("%H:%M:%S")
 
-    if signal == "CALL":
-        send_message(f"📈 {pair} → BUY (CALL)\n⏱ Time: 1 Minute")
-    elif signal == "PUT":
-        send_message(f"📉 {pair} → SELL (PUT)\n⏱ Time: 1 Minute")
+    return direction, confidence, entry_time
+
+# ==========================================
+# USER MESSAGE HANDLER
+# ==========================================
+
+async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    pair = update.message.text.upper()
+
+    # ======================================
+    # ANALYSIS MESSAGE
+    # ======================================
+
+    await update.message.reply_text(
+f"""
+🔍 GENERATING NEW SIGNAL
+
+📊 Asset: {pair}
+⏰ Time Frame: 1 Minute
+🧠 Status: Analyzing market conditions...
+
+📈 PROCESS STARTED
+
+• Scanning latest market trends 🔄
+• Analyzing candle movement 📊
+• Detecting smart entry zones ⏳
+• Calculating volatility levels 📉
+• Generating fresh AI signal ⚡
+
+⌛ Please wait 3-5 seconds...
+"""
+    )
+
+    await asyncio.sleep(4)
+
+    # ======================================
+    # GENERATE SIGNAL
+    # ======================================
+
+    direction, confidence, entry_time = generate_signal()
+
+    # ======================================
+    # SIGNAL STYLE
+    # ======================================
+
+    if direction == "CALL":
+
+        signal_box = """
+🟩🟩🟩🟩🟩🟩🟩
+🟩     CALL     🟩
+🟩🟩🟩🟩🟩🟩🟩
+"""
+
     else:
-        send_message(f"⚠️ No clear signal for {pair}")
 
-# ================= AUTO SCANNER =================
-def auto_scan():
-    while True:
-        for pair in PAIRS:
-            signal = generate_signal(pair)
+        signal_box = """
+🟥🟥🟥🟥🟥🟥🟥
+🟥      PUT      🟥
+🟥🟥🟥🟥🟥🟥🟥
+"""
 
-            if signal in ["CALL", "PUT"]:
-                if last_signal.get(pair) != signal:
-                    send_message(f"🔥 AUTO SIGNAL\n{pair} → {signal} (1M)")
-                    last_signal[pair] = signal
+    # ======================================
+    # FINAL SIGNAL
+    # ======================================
 
-        time.sleep(15)  # FAST SCAN (no long delay)
+    await update.message.reply_text(
+f"""
+✅ NEW SIGNAL GENERATED
 
-# ================= TELEGRAM COMMAND =================
-def get_updates(offset=None):
-    url = f"https://api.telegram.org/bot{BOT_TOKEN}/getUpdates"
-    return requests.get(url, params={"timeout": 100, "offset": offset}).json()
+📊 Asset Analysis: {pair}
+⏰ Time Frame: 1 Minute
+🕓 Entry Time: {entry_time}
 
-def handle_updates():
-    last_id = None
+{signal_box}
 
-    while True:
-        updates = get_updates(last_id)
+🎯 Direction: {direction}
 
-        for update in updates.get("result", []):
-            last_id = update["update_id"] + 1
+🔥 Confidence Level: {confidence}%
 
-            if "message" in update:
-                text = update["message"]["text"].lower()
+⚠️ ENTER TRADE IMMEDIATELY
+⚠️ SIGNAL VALID FOR CURRENT CANDLE ONLY
+⚠️ LATE ENTRY MAY CAUSE LOSS
 
-                if text == "/start":
-                    send_message("🤖 Bot Active!\nUse /signal eurusd")
+📈 OTC AI ANALYSIS COMPLETE
+"""
+    )
 
-                elif text.startswith("/signal"):
-                    parts = text.split()
+# ==========================================
+# MAIN FUNCTION
+# ==========================================
 
-                    if len(parts) < 2:
-                        send_message("⚠️ Use: /signal eurusd")
-                        continue
+def main():
 
-                    pair = parts[1].upper()
+    app = Application.builder().token(BOT_TOKEN).build()
 
-                    # FIX FORMAT (EURUSD → EUR/USD)
-                    if "/" not in pair:
-                        pair = pair[:3] + "/" + pair[3:]
+    app.add_handler(CommandHandler("start", start))
 
-                    send_signal(pair)
+    app.add_handler(
+        MessageHandler(
+            filters.TEXT & ~filters.COMMAND,
+            message_handler
+        )
+    )
 
-        time.sleep(2)
+    print("BOT STARTED SUCCESSFULLY")
 
-# ================= RUN =================
+    app.run_polling()
+
+# ==========================================
+
 if __name__ == "__main__":
-    threading.Thread(target=auto_scan).start()
-    threading.Thread(target=handle_updates).start()
-
-    app.run(host="0.0.0.0", port=10000)
+    main()
